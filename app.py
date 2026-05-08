@@ -580,11 +580,4 @@ with tab_raw:
 
         st.caption(f"แสดง {len(df_raw)} รายการ")
         st.dataframe(df_raw, use_container_width=True, height=500)
-        with st.expander("📊 สถิติสรุป"):
-            st.dataframe(df_raw.describe(include="all"), use_container_width=True)
-    else:
-        st.info("ไม่มีข้อมูล")
-
-
-st.divider()
-st.caption(f"🏭 QA CPRAM Dashboard v2.0 | ลาดหลุมแก้ว | © {pd.Timestamp.now().year} CPRAM Co., Ltd.")
+        with st.expand
