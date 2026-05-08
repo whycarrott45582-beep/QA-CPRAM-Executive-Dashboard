@@ -126,6 +126,8 @@ def upload_file_to_drive(
             mime = "text/csv"
         elif filename.lower().endswith(".xlsx"):
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif filename.lower().endswith((".html", ".htm")):
+            mime = "text/html"
         else:
             mime = "application/octet-stream"
 
@@ -143,9 +145,10 @@ def upload_file_to_drive(
 # ─── Download / Read ───────────────────────────────────────
 
 def list_files_in_folder(service, folder_id: str) -> list[dict]:
-    """รายการไฟล์ CSV/Excel ใน folder"""
+    """รายการไฟล์ CSV/Excel/HTML ใน folder"""
     query = (f"'{folder_id}' in parents and trashed=false and ("
              "mimeType='text/csv' or "
+             "mimeType='text/html' or "
              "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or "
              "mimeType='application/vnd.ms-excel' or "
              "mimeType='application/vnd.google-apps.spreadsheet')")

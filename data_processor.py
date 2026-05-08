@@ -136,8 +136,14 @@ def load_uploaded_file(uploaded_file) -> pd.DataFrame | None:
             return pd.read_csv(uploaded_file, encoding="utf-8-sig")
         elif name.endswith((".xlsx", ".xls")):
             return pd.read_excel(uploaded_file)
-    except Exception:
-        pass
+        elif name.endswith((".html", ".htm")):
+            content = uploaded_file.read().decode("utf-8-sig", errors="replace")
+            tables = pd.read_html(io.StringIO(content))
+            if tables:
+                # เลือกตารางที่ใหญ่ที่สุด (มีแถวมากสุด)
+                return max(tables, key=len)
+    except Exception as e:
+        print(f"[Upload] Error reading file: {e}")
     return None
 
 

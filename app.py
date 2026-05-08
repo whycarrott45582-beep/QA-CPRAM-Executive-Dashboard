@@ -207,7 +207,7 @@ with tab_upload:
 
     uploaded_file = st.file_uploader(
         f"เลือกไฟล์สำหรับ {cfg['icon']} {cfg['name_th']}",
-        type=["csv", "xlsx", "xls"],
+        type=["csv", "xlsx", "xls", "html", "htm"],
         label_visibility="collapsed",
         key=f"uploader_{selected_dept}"
     )
