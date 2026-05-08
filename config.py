@@ -58,7 +58,7 @@ DEPARTMENTS = {
     "07_Lab_Micro": {
         "name_th": "Lab จุลชีววิทยา", "name_en": "Lab Microbiology",
         "group": "midstream", "icon": "🔬", "kpi_column": "pass_rate",
-        "threshold_green": 100, "threshold_yellow": 95,
+        "threshold_green": 90, "threshold_yellow": 80,
         "description": "ตรวจสอบความปลอดภัยทางจุลชีววิทยา"
     },
     "08_Lab_Chem": {
