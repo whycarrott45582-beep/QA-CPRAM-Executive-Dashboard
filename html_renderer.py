@@ -763,3 +763,68 @@ def render_html_dashboard(dept_key: str, html_str: str):
 def _render_raw_html(html_str: str):
     """Render HTML ต้นฉบับใน iframe"""
     components.html(html_str, height=650, scrolling=True)
+
+
+def extract_html_kpi(html_str: str) -> float | None:
+    """
+    ดึงค่า KPI % หลักจาก HTML Dashboard (Chart.js)
+    ค้นหาตัวเลขเปอร์เซ็นต์ที่อยู่ใกล้ keyword "ผ่านเกณฑ์" / "pass rate" / "อัตรา"
+    """
+    import re
+
+    # ── Strategy 1: % อยู่ติดกับ keyword ผ่านเกณฑ์ ──────────
+    kw_patterns = [
+        r'(\d{1,3}\.?\d*)\s*%(?:[^<]{0,30})(?:ผ่านเกณฑ์|อัตราผ่าน|pass\s*rate|compliance)',
+        r'(?:ผ่านเกณฑ์|อัตราผ่าน|pass\s*rate|compliance)(?:[^<]{0,60})(\d{1,3}\.?\d*)\s*%',
+        r'(?:อัตราผ่านเกณฑ์|Pass\s*Rate|Compliance\s*Rate)(?:<[^>]+>|\s){0,5}(\d{1,3}\.?\d*)',
+    ]
+    for pat in kw_patterns:
+        m = re.search(pat, html_str, re.IGNORECASE | re.DOTALL)
+        if m:
+            try:
+                val = float(m.group(1))
+                if 50.0 <= val <= 100.0:
+                    return val
+            except Exception:
+                pass
+
+    # ── Strategy 2: aria-label ที่มี pass/ND/ผ่าน ────────────
+    for aria_m in re.finditer(r'aria-label=["\']([^"\']{10,})["\']', html_str, re.IGNORECASE):
+        text = aria_m.group(1)
+        if any(kw in text.lower() for kw in ["pass", "nd", "ผ่าน", "not detected", "ไม่พบ"]):
+            pct_m = re.search(r'(\d{1,3}\.?\d*)\s*%', text)
+            if pct_m:
+                try:
+                    val = float(pct_m.group(1))
+                    if 50.0 <= val <= 100.0:
+                        return val
+                except Exception:
+                    pass
+
+    # ── Strategy 3: sr-only / h2 summary text ────────────────
+    summary = _extract_summary_from_html(html_str) or ""
+    pct_matches = re.findall(r'(\d{1,3}\.?\d*)\s*%', summary)
+    for p in pct_matches:
+        try:
+            val = float(p)
+            if 50.0 <= val <= 100.0:
+                return val
+        except Exception:
+            pass
+
+    # ── Strategy 4: หา % ทั้งหมด แล้วเลือกค่าที่น่าจะเป็น KPI ─
+    all_pcts = re.findall(r'(\d{1,3}\.?\d+)%', html_str)
+    candidates = []
+    for p in all_pcts:
+        try:
+            val = float(p)
+            if 50.0 <= val < 100.0:  # KPI จริงมักไม่ใช่ 100% พอดี
+                candidates.append(val)
+        except Exception:
+            pass
+    if candidates:
+        # เลือก median
+        candidates.sort()
+        return candidates[len(candidates) // 2]
+
+    return None

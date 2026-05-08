@@ -64,15 +64,21 @@ h1 { color: #1a237e; font-size: 1.6rem !important; }
 if "uploaded_override" not in st.session_state:
     st.session_state.uploaded_override = {}
 if "html_content" not in st.session_state:
-    st.session_state.html_content = {}   # dept_key → raw HTML string
+    st.session_state.html_content = {}      # dept_key → raw HTML string
+if "html_kpi_scores" not in st.session_state:
+    st.session_state.html_kpi_scores = {}   # dept_key → float KPI score จาก HTML
 
 # โหลด HTML จาก local_data เข้า session_state อัตโนมัติ (ครั้งแรก)
 if "local_html_loaded" not in st.session_state:
+    from html_renderer import extract_html_kpi
     for _dk in DEPARTMENTS:
         if _dk not in st.session_state.html_content:
             _raw = load_local_html_raw(_dk)
             if _raw:
                 st.session_state.html_content[_dk] = _raw
+                _kpi = extract_html_kpi(_raw)
+                if _kpi is not None:
+                    st.session_state.html_kpi_scores[_dk] = _kpi
     st.session_state.local_html_loaded = True
 
 # เชื่อม Google Drive ครั้งเดียวต่อ session
@@ -148,6 +154,28 @@ alerts       = run_linkage_checks(data)
 alerts_df    = alerts_to_dataframe(alerts)
 dept_kpis    = factory_kpi["dept_kpis"]
 TC = {"green": "#00C853", "yellow": "#FFD600", "red": "#D50000"}
+
+# ── Override KPI ด้วยค่าจริงจาก HTML Dashboard ───────────────
+_html_scores = st.session_state.get("html_kpi_scores", {})
+if _html_scores:
+    for _dk, _score in _html_scores.items():
+        if _dk in dept_kpis and _score is not None:
+            _thr_g = DEPARTMENTS[_dk].get("threshold_green", 85)
+            _thr_y = DEPARTMENTS[_dk].get("threshold_yellow", 70)
+            _traffic = "green" if _score >= _thr_g else ("yellow" if _score >= _thr_y else "red")
+            dept_kpis[_dk]["score"]   = round(_score, 1)
+            dept_kpis[_dk]["traffic"] = _traffic
+    # คำนวณ factory_kpi ใหม่หลัง override
+    _scores_all = [v["score"] for v in dept_kpis.values() if v.get("score") is not None]
+    _reds    = sum(1 for v in dept_kpis.values() if v.get("traffic") == "red")
+    _yellows = sum(1 for v in dept_kpis.values() if v.get("traffic") == "yellow")
+    if _scores_all:
+        import numpy as _np
+        factory_kpi["factory_score"]   = round(float(_np.mean(_scores_all)), 1)
+        factory_kpi["factory_traffic"] = "red" if (_reds >= 2 or factory_kpi["factory_score"] < 70) else \
+                                         "yellow" if (_reds == 1 or _yellows >= 3 or factory_kpi["factory_score"] < 85) else "green"
+        factory_kpi["red_count"]    = _reds
+        factory_kpi["yellow_count"] = _yellows
 
 
 # ════════════════════════════════════════════════════════════
@@ -308,16 +336,22 @@ with tab_upload:
                         if saved:
                             # อัปเดต session state ทันที
                             st.session_state.uploaded_override[selected_dept] = df_new
-                            # เก็บ HTML raw content ไว้แสดงใน Tab 3
+                            # เก็บ HTML raw content + extract KPI
                             if uploaded_file.name.lower().endswith((".html", ".htm")):
                                 try:
+                                    from html_renderer import extract_html_kpi
                                     raw_html = file_bytes.decode("utf-8-sig", errors="replace")
                                     st.session_state.html_content[selected_dept] = raw_html
+                                    _kpi_val = extract_html_kpi(raw_html)
+                                    if _kpi_val is not None:
+                                        st.session_state.html_kpi_scores[selected_dept] = _kpi_val
+                                        st.info(f"📊 ระบบอ่านค่า KPI จากไฟล์ HTML: **{_kpi_val:.1f}%**")
                                 except Exception:
                                     pass
                             else:
-                                # ถ้าเปลี่ยนมาอัปโหลด CSV/Excel → ล้าง HTML เก่าออก
+                                # CSV/Excel → ล้าง HTML เก่าออก
                                 st.session_state.html_content.pop(selected_dept, None)
+                                st.session_state.html_kpi_scores.pop(selected_dept, None)
                             st.cache_data.clear()
                             st.rerun()
 
