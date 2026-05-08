@@ -271,4 +271,37 @@ def compute_export_readiness(data: dict) -> dict:
             issues.extend(kpi["issues"])
     avg = round(float(np.mean(scores)),1) if scores else 0.0
     if avg >= 95:   status, label = "green",  "พร้อมส่งออก ✅"
-    elif avg >= 80: status, label = "yellow", "ต้อง�
+    elif avg >= 80: status, label = "yellow", "ต้องตรวจสอบเพิ่ม"
+    else:           status, label = "red",    "ยังไม่พร้อม"
+    return {"score": avg, "status": status, "label": label, "issues": issues[:3]}
+
+
+def compute_domestic_quality(data: dict) -> dict:
+    domestic_depts = ["04_Hygiene","05_Pest_Control","06_Monitor","07_Lab_Micro","08_Lab_Chem"]
+    scores, issues = [], []
+    for dk in domestic_depts:
+        if dk in data:
+            kpi = compute_dept_kpi(dk, data[dk])
+            if kpi["score"] is not None: scores.append(kpi["score"])
+            issues.extend(kpi["issues"])
+    avg = round(float(np.mean(scores)),1) if scores else 0.0
+    if avg >= 90:   status, label = "green",  "มาตรฐานปลอดภัย"
+    elif avg >= 75: status, label = "yellow", "ต้องปรับปรุง"
+    else:           status, label = "red",    "ต่ำกว่าเกณฑ์"
+    return {"score": avg, "status": status, "label": label, "issues": issues[:3]}
+
+
+def save_snapshot(data: dict, db_path: Path = None):
+    if db_path is None: db_path = DB_PATH
+    conn = sqlite3.connect(db_path)
+    ts = datetime.now().isoformat()
+    for dept_key, df in data.items():
+        if df is not None and not df.empty:
+            df_save = df.copy()
+            df_save["_snapshot_ts"] = ts
+            df_save["_dept"] = dept_key
+            try:
+                df_save.to_sql(dept_key.replace("-","_"), conn, if_exists="append", index=False)
+            except Exception:
+                pass
+    conn.close()
