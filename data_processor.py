@@ -160,10 +160,20 @@ def load_uploaded_file(uploaded_file) -> pd.DataFrame | None:
             return pd.read_excel(uploaded_file)
         elif name.endswith((".html", ".htm")):
             content = uploaded_file.read().decode("utf-8-sig", errors="replace")
-            tables = pd.read_html(io.StringIO(content))
-            if tables:
-                # เลือกตารางที่ใหญ่ที่สุด (มีแถวมากสุด)
-                return max(tables, key=len)
+            # ลองอ่านตาราง
+            try:
+                tables = pd.read_html(io.StringIO(content))
+                if tables:
+                    return max(tables, key=len)
+            except Exception:
+                pass
+            # ถ้าไม่มีตาราง (Chart.js dashboard) → return placeholder ให้ผ่านการ save
+            return pd.DataFrame([{
+                "file_name":  uploaded_file.name,
+                "status":     "OK",
+                "type":       "html_dashboard",
+                "note":       "Dashboard HTML — แสดงผลใน Tab ข้อมูลรายหน่วยงาน"
+            }])
     except Exception as e:
         print(f"[Upload] Error reading file: {e}")
     return None

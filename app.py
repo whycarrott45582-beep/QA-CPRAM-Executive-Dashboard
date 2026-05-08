@@ -239,22 +239,36 @@ with tab_upload:
 
     # ─── Preview + Save ─────────────────────────────────────
     if uploaded_file is not None:
+        is_html = uploaded_file.name.lower().endswith((".html", ".htm"))
+
+        # เก็บ raw HTML ทันทีที่เลือกไฟล์
+        if is_html:
+            try:
+                _raw_preview = uploaded_file.getvalue().decode("utf-8-sig", errors="replace")
+                st.session_state.html_content[selected_dept] = _raw_preview
+            except Exception:
+                pass
+
         df_new = load_uploaded_file(uploaded_file)
         if df_new is not None and not df_new.empty:
             st.divider()
             st.markdown("### 3️⃣ ตรวจสอบข้อมูลก่อนบันทึก")
 
-            # Preview
-            st.dataframe(df_new.head(10), use_container_width=True)
-            st.caption(f"พบ {len(df_new)} แถว × {len(df_new.columns)} คอลัมน์")
-
-            # ตรวจสอบ column สำคัญ
-            kpi_col = cfg["kpi_column"]
-            missing_kpi = kpi_col not in df_new.columns
-            if missing_kpi:
-                st.warning(f"⚠️ ไม่พบคอลัมน์ `{kpi_col}` — ระบบจะใช้คอลัมน์ `status` แทน")
+            if is_html:
+                # HTML Dashboard — แสดง preview จริง
+                st.success(f"✅ HTML Dashboard ({uploaded_file.name}) — พร้อมบันทึก")
+                if selected_dept in st.session_state.html_content:
+                    import streamlit.components.v1 as _comp
+                    _comp.html(st.session_state.html_content[selected_dept], height=500, scrolling=True)
             else:
-                st.success(f"✅ พบคอลัมน์ KPI `{kpi_col}` — พร้อมบันทึก")
+                # CSV/Excel — แสดงตาราง
+                st.dataframe(df_new.head(10), use_container_width=True)
+                st.caption(f"พบ {len(df_new)} แถว × {len(df_new.columns)} คอลัมน์")
+                kpi_col = cfg["kpi_column"]
+                if kpi_col not in df_new.columns:
+                    st.warning(f"⚠️ ไม่พบคอลัมน์ `{kpi_col}` — ระบบจะใช้คอลัมน์ `status` แทน")
+                else:
+                    st.success(f"✅ พบคอลัมน์ KPI `{kpi_col}` — พร้อมบันทึก")
 
             st.divider()
             st.markdown("### 4️⃣ บันทึกข้อมูล")
