@@ -122,9 +122,31 @@ def load_local_dept(dept_key: str) -> pd.DataFrame | None:
                 frames.append(pd.read_csv(f, encoding="utf-8-sig"))
             elif f.suffix.lower() in (".xlsx", ".xls"):
                 frames.append(pd.read_excel(f))
+            elif f.suffix.lower() in (".html", ".htm"):
+                # HTML → ลองอ่านตาราง ถ้าไม่มีตาราง → สร้าง placeholder
+                try:
+                    tbls = pd.read_html(f, encoding="utf-8")
+                    if tbls:
+                        frames.append(max(tbls, key=len))
+                except Exception:
+                    # HTML ไม่มีตาราง (Chart.js dashboard) → สร้าง row เพื่อให้ KPI รู้ว่ามีข้อมูล
+                    frames.append(pd.DataFrame([{"source": str(f.name), "status": "OK", "html_dashboard": True}]))
         except Exception:
             pass
     return pd.concat(frames, ignore_index=True) if frames else None
+
+
+def load_local_html_raw(dept_key: str) -> str | None:
+    """โหลด raw HTML จาก local_data — ใช้สำหรับ html_renderer"""
+    folder = LOCAL_DATA_DIR / dept_key
+    if not folder.exists():
+        return None
+    for f in folder.glob("*.htm*"):
+        try:
+            return f.read_text(encoding="utf-8-sig", errors="replace")
+        except Exception:
+            pass
+    return None
 
 
 def load_uploaded_file(uploaded_file) -> pd.DataFrame | None:

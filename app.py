@@ -15,13 +15,16 @@ from config import APP_TITLE, APP_ICON, DEPARTMENTS, GROUPS, TRAFFIC
 from data_processor import (
     compute_factory_kpi, compute_export_readiness,
     compute_domestic_quality, compute_dept_kpi,
-    load_uploaded_file, save_snapshot
+    load_uploaded_file, save_snapshot, load_local_html_raw
 )
 from linkage_engine import run_linkage_checks, alerts_to_dataframe
 from gdrive_handler import (
     get_gdrive_service, get_root_folder_id,
     upload_file_to_drive, load_all_from_drive
 )
+from html_renderer import render_html_dashboard
+from exec_dashboard import build_exec_html
+import streamlit.components.v1 as components
 
 # ─── Page config ───────────────────────────────────────────
 st.set_page_config(
@@ -60,6 +63,17 @@ h1 { color: #1a237e; font-size: 1.6rem !important; }
 
 if "uploaded_override" not in st.session_state:
     st.session_state.uploaded_override = {}
+if "html_content" not in st.session_state:
+    st.session_state.html_content = {}   # dept_key → raw HTML string
+
+# โหลด HTML จาก local_data เข้า session_state อัตโนมัติ (ครั้งแรก)
+if "local_html_loaded" not in st.session_state:
+    for _dk in DEPARTMENTS:
+        if _dk not in st.session_state.html_content:
+            _raw = load_local_html_raw(_dk)
+            if _raw:
+                st.session_state.html_content[_dk] = _raw
+    st.session_state.local_html_loaded = True
 
 # เชื่อม Google Drive ครั้งเดียวต่อ session
 @st.cache_resource(show_spinner=False)
@@ -120,7 +134,7 @@ with st.sidebar:
 
     st.caption(f"🕐 {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}")
     st.divider()
-    st.caption("📌 วิธีใช้งาน\n1. ไปที่ Tab **📤 อัปโหลดข้อมูล**\n2. เลือกหน่วยงาน\n3. ลากวางไฟล์ CSV/Excel\n4. กดบันทึก → Dashboard อัปเดตอัตโนมัติ")
+    st.caption("📌 วิธีใช้งาน\n1. ไปที่ Tab **📤 อัปโหลดข้อมูล**\n2. เลือกหน่วยงาน\n3. ลากวางไฟล์ **HTML / CSV / Excel**\n4. กดบันทึก → Dashboard อัปเดตอัตโนมัติ\n\n💡 ไฟล์ HTML จะแสดงผลเฉพาะทางของแต่ละหน่วยงาน")
 
 
 # ════════════════════════════════════════════════════════════
@@ -200,14 +214,14 @@ with tab_upload:
         '<div class="upload-box">'
         '<div style="font-size:3rem">📂</div>'
         '<div style="font-size:1.1rem;font-weight:600;color:#1976D2">ลากไฟล์มาวางที่นี่</div>'
-        '<div style="color:#888;font-size:0.9rem;margin-top:6px">รองรับ CSV, Excel (.xlsx, .xls) — ขนาดไม่เกิน 200MB</div>'
+        '<div style="color:#888;font-size:0.9rem;margin-top:6px">รองรับ CSV, Excel (.xlsx, .xls) และ HTML — ขนาดไม่เกิน 200MB</div>'
         '</div>',
         unsafe_allow_html=True
     )
 
     uploaded_file = st.file_uploader(
         f"เลือกไฟล์สำหรับ {cfg['icon']} {cfg['name_th']}",
-        type=["csv", "xlsx", "xls", "html", "htm"],
+        type=None,   # รับทุกประเภทไฟล์ — HTML, CSV, Excel ทั้งหมด
         label_visibility="collapsed",
         key=f"uploader_{selected_dept}"
     )
@@ -280,6 +294,16 @@ with tab_upload:
                         if saved:
                             # อัปเดต session state ทันที
                             st.session_state.uploaded_override[selected_dept] = df_new
+                            # เก็บ HTML raw content ไว้แสดงใน Tab 3
+                            if uploaded_file.name.lower().endswith((".html", ".htm")):
+                                try:
+                                    raw_html = file_bytes.decode("utf-8-sig", errors="replace")
+                                    st.session_state.html_content[selected_dept] = raw_html
+                                except Exception:
+                                    pass
+                            else:
+                                # ถ้าเปลี่ยนมาอัปโหลด CSV/Excel → ล้าง HTML เก่าออก
+                                st.session_state.html_content.pop(selected_dept, None)
                             st.cache_data.clear()
                             st.rerun()
 
@@ -323,128 +347,18 @@ with tab_upload:
 
 
 # ════════════════════════════════════════════════════════════
-# TAB 2 — EXECUTIVE OVERVIEW
+# TAB 2 — EXECUTIVE OVERVIEW (HTML Dashboard — Chemical Lab Style)
 # ════════════════════════════════════════════════════════════
 
 with tab_exec:
-    c_score, c_export, c_domestic, c_pending = st.columns([2, 1.5, 1.5, 1])
-    t = factory_kpi["factory_traffic"]
-
-    with c_score:
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number", value=factory_kpi["factory_score"],
-            number={"suffix": "%", "font": {"size": 40}},
-            title={"text": "🏭 Factory QA Health Score", "font": {"size": 14}},
-            gauge={"axis": {"range": [0, 100]}, "bar": {"color": TC[t]},
-                   "steps": [{"range": [0,70], "color": "#ffcdd2"},
-                              {"range": [70,85], "color": "#fff9c4"},
-                              {"range": [85,100], "color": "#c8e6c9"}],
-                   "threshold": {"line": {"color":"black","width":3}, "thickness":0.75, "value":85}}))
-        fig.update_layout(height=230, margin=dict(l=20,r=20,t=40,b=10))
-        st.plotly_chart(fig, use_container_width=True)
-        st.markdown(
-            f'<div class="tl-card tl-{t}">'
-            f'{TRAFFIC[t]["emoji"]} สถานะโรงงานวันนี้: <b>{TRAFFIC[t]["label"]}</b></div>',
-            unsafe_allow_html=True)
-
-    for col, kpi_d, title, thr in [
-        (c_export,   export_kpi,   "🌐 Export Readiness (5%)",  [80, 95]),
-        (c_domestic, domestic_kpi, "🏠 Domestic Quality (95%)", [75, 90])]:
-        with col:
-            et = kpi_d["status"]
-            fig2 = go.Figure(go.Indicator(
-                mode="gauge+number", value=kpi_d["score"],
-                number={"suffix": "%", "font": {"size": 32}},
-                title={"text": title, "font": {"size": 13}},
-                gauge={"axis": {"range": [0, 100]}, "bar": {"color": TC[et]},
-                       "steps": [{"range": [0,thr[0]], "color": "#ffcdd2"},
-                                  {"range": [thr[0],thr[1]], "color": "#fff9c4"},
-                                  {"range": [thr[1],100], "color": "#c8e6c9"}]}))
-            fig2.update_layout(height=200, margin=dict(l=10,r=10,t=40,b=10))
-            st.plotly_chart(fig2, use_container_width=True)
-            st.markdown(f'<div class="tl-card tl-{et}">{kpi_d["label"]}</div>', unsafe_allow_html=True)
-            for iss in kpi_d.get("issues", [])[:2]:
-                st.caption(f"⚠️ {iss}")
-
-    with c_pending:
-        for num, lbl in [
-            (f'🔴 {factory_kpi["red_count"]}',    "หน่วยงานวิกฤต"),
-            (f'🟡 {factory_kpi["yellow_count"]}',  "หน่วยงานเฝ้าระวัง"),
-            (f'📋 {factory_kpi["total_pending"]}', "งานค้าง (Pending)"),
-            (f'🔔 {len(alerts)}',                  "Cross-Dept Alerts")]:
-            st.markdown(
-                f'<div class="metric-box">'
-                f'<div class="metric-num">{num}</div>'
-                f'<div class="metric-lbl">{lbl}</div></div>',
-                unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("🏭 สถานะ 11 หน่วยงาน QA")
-
-    for group_key, group_cfg in GROUPS.items():
-        group_depts = {k: v for k, v in DEPARTMENTS.items() if v["group"] == group_key}
-        if not group_depts:
-            continue
-        st.markdown(f"**{group_cfg['label']}**")
-        cols = st.columns(len(group_depts))
-        for idx, (dk, dc) in enumerate(group_depts.items()):
-            kpi = dept_kpis.get(dk, {})
-            score = kpi.get("score")
-            traffic = kpi.get("traffic", "red")
-            score_str = f"{score:.1f}%" if score is not None else "N/A"
-            bc = TC[traffic]
-            pending_val = kpi.get("pending", 0)
-            pending_html = f'<div style="font-size:0.75rem;color:#888">⏳ {pending_val} pending</div>' if pending_val else ""
-            with cols[idx]:
-                st.markdown(
-                    f'<div style="border:2px solid {bc};border-radius:10px;padding:10px;'
-                    f'text-align:center;background:#fafafa;min-height:140px">'
-                    f'<div style="font-size:1.8rem">{dc["icon"]}</div>'
-                    f'<div style="font-weight:700;font-size:0.82rem;color:#333">{dc["name_th"]}</div>'
-                    f'<div style="font-size:1.5rem;font-weight:800;color:{bc}">{score_str}</div>'
-                    f'<div style="font-size:1.1rem">{TRAFFIC[traffic]["emoji"]} {TRAFFIC[traffic]["label"]}</div>'
-                    f'{pending_html}</div>',
-                    unsafe_allow_html=True)
-                if kpi.get("issues"):
-                    with st.popover("📌 ปัญหา", use_container_width=True):
-                        for iss in kpi["issues"][:5]:
-                            st.warning(iss)
-        st.write("")
-
-    st.divider()
-    c_issues, c_radar = st.columns(2)
-
-    with c_issues:
-        st.subheader("🚨 ปัญหาสำคัญวันนี้")
-        if factory_kpi["top_issues"]:
-            for i, issue in enumerate(factory_kpi["top_issues"][:5], 1):
-                cls = "alert-critical" if i <= 2 else "alert-high"
-                st.markdown(f'<div class="{cls}">{i}. {issue}</div>', unsafe_allow_html=True)
-        else:
-            st.success("✅ ไม่พบปัญหา — ทุกหน่วยงานอยู่ในเกณฑ์")
-        for a in [x for x in alerts if x["severity"] == "critical"][:3]:
-            st.markdown(
-                f'<div class="alert-critical">🔴 <b>{a["message"]}</b><br>'
-                f'<small>{a["trigger"]} → {a["target"]} | {a["count"]} รายการ</small></div>',
-                unsafe_allow_html=True)
-
-    with c_radar:
-        st.subheader("📡 Radar Chart")
-        dept_names = [DEPARTMENTS[k]["name_th"] for k in DEPARTMENTS]
-        scores_all = [dept_kpis[k]["score"] or 0 for k in DEPARTMENTS]
-        fig_r = go.Figure()
-        fig_r.add_trace(go.Scatterpolar(
-            r=scores_all + [scores_all[0]], theta=dept_names + [dept_names[0]],
-            fill="toself", fillcolor="rgba(26,35,126,0.15)",
-            line=dict(color="#1a237e", width=2), name="KPI ปัจจุบัน"))
-        fig_r.add_trace(go.Scatterpolar(
-            r=[85]*len(dept_names) + [85], theta=dept_names + [dept_names[0]],
-            mode="lines", line=dict(color="green", width=1, dash="dot"),
-            name="เกณฑ์มาตรฐาน (85%)"))
-        fig_r.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-            showlegend=True, height=380, margin=dict(l=40,r=40,t=20,b=20))
-        st.plotly_chart(fig_r, use_container_width=True)
+    exec_html = build_exec_html(
+        factory_kpi  = factory_kpi,
+        export_kpi   = export_kpi,
+        domestic_kpi = domestic_kpi,
+        dept_kpis    = dept_kpis,
+        alerts       = alerts,
+    )
+    components.html(exec_html, height=920, scrolling=True)
 
 
 # ════════════════════════════════════════════════════════════
@@ -460,55 +374,82 @@ with tab_dept:
     kpi = dept_kpis.get(dept_select, {})
     cfg = DEPARTMENTS[dept_select]
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("📊 คะแนน KPI", f"{kpi.get('score','N/A')}%")
-    k2.metric("📋 จำนวนรายการ", kpi.get("record_count", 0))
-    k3.metric("⏳ Pending", kpi.get("pending", 0))
-    k4.metric("สถานะ",
-              TRAFFIC.get(kpi.get("traffic","red"),{}).get("emoji","") + " " +
-              TRAFFIC.get(kpi.get("traffic","red"),{}).get("label",""))
     st.info(f"ℹ️ {cfg['description']}")
 
-    if not df_dept.empty:
-        if "status" in df_dept.columns:
-            sc = df_dept["status"].value_counts().reset_index()
-            sc.columns = ["Status", "จำนวน"]
-            cm = {"PASS":"#00C853","FAIL":"#D50000","OK":"#00C853","REJECT":"#D50000",
-                  "VALID":"#00C853","EXPIRED":"#D50000","EXPIRING_SOON":"#FFD600",
-                  "WARNING":"#FFD600","ALERT":"#FF6D00"}
-            fig_b = px.bar(sc, x="Status", y="จำนวน", color="Status",
-                           color_discrete_map=cm, title=f"สรุปสถานะ — {cfg['name_th']}")
-            fig_b.update_layout(height=280, margin=dict(l=20,r=20,t=40,b=20), showlegend=False)
-            st.plotly_chart(fig_b, use_container_width=True)
+    # ── ถ้ามี HTML content → ใช้ HTML renderer เฉพาะทาง ───
+    html_raw = st.session_state.html_content.get(dept_select)
 
-        date_cols = [c for c in df_dept.columns if "date" in c.lower() or "time" in c.lower()]
-        kpi_col = cfg.get("kpi_column")
-        if date_cols and kpi_col and kpi_col in df_dept.columns:
-            try:
-                df_t = df_dept.copy()
-                df_t[date_cols[0]] = pd.to_datetime(df_t[date_cols[0]], errors="coerce")
-                df_t = df_t.dropna(subset=[date_cols[0], kpi_col])
-                df_t = df_t.groupby(df_t[date_cols[0]].dt.date)[kpi_col].mean().reset_index()
-                df_t.columns = ["วันที่", "ค่าเฉลี่ย KPI"]
-                fig_l = px.line(df_t, x="วันที่", y="ค่าเฉลี่ย KPI",
-                                title=f"Trend — {cfg['name_th']}", markers=True)
-                fig_l.add_hline(y=cfg["threshold_green"], line_dash="dot",
-                                line_color="green", annotation_text="Green")
-                fig_l.add_hline(y=cfg["threshold_yellow"], line_dash="dot",
-                                line_color="orange", annotation_text="Yellow")
-                fig_l.update_layout(height=280, margin=dict(l=20,r=20,t=40,b=20))
-                st.plotly_chart(fig_l, use_container_width=True)
-            except Exception:
-                pass
+    if html_raw:
+        # แสดง badge ว่าข้อมูลมาจาก HTML
+        st.markdown(
+            '<div style="display:inline-block;background:#e3f2fd;border:1px solid #1976D2;'
+            'border-radius:20px;padding:4px 14px;font-size:0.85rem;color:#1976D2;margin-bottom:8px">'
+            '📄 วิเคราะห์จากไฟล์ HTML</div>',
+            unsafe_allow_html=True
+        )
+        render_html_dashboard(dept_select, html_raw)
 
-        st.subheader("📋 ตารางข้อมูล")
-        st.dataframe(df_dept, use_container_width=True, height=350)
-        st.download_button(
-            "⬇️ ดาวน์โหลด CSV",
-            df_dept.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
-            f"{dept_select}_{pd.Timestamp.now().strftime('%Y%m%d')}.csv", "text/csv")
     else:
-        st.warning("ไม่มีข้อมูล")
+        # ── ไม่มี HTML → แสดงแบบเดิม (CSV/Excel หรือ Demo data) ──
+        src_label = "📊 ข้อมูลตัวอย่าง (Demo)" if dept_select not in st.session_state.uploaded_override else "📁 ข้อมูลที่อัปโหลด (CSV/Excel)"
+        st.markdown(
+            f'<div style="display:inline-block;background:#f5f5f5;border:1px solid #ccc;'
+            f'border-radius:20px;padding:4px 14px;font-size:0.85rem;color:#555;margin-bottom:8px">'
+            f'{src_label}</div>',
+            unsafe_allow_html=True
+        )
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("📊 คะแนน KPI", f"{kpi.get('score', 'N/A')}%")
+        k2.metric("📋 จำนวนรายการ", kpi.get("record_count", 0))
+        k3.metric("⏳ Pending", kpi.get("pending", 0))
+        k4.metric("สถานะ",
+                  TRAFFIC.get(kpi.get("traffic", "red"), {}).get("emoji", "") + " " +
+                  TRAFFIC.get(kpi.get("traffic", "red"), {}).get("label", ""))
+
+        if not df_dept.empty:
+            col_chart1, col_chart2 = st.columns(2)
+            with col_chart1:
+                if "status" in df_dept.columns:
+                    sc = df_dept["status"].value_counts().reset_index()
+                    sc.columns = ["Status", "จำนวน"]
+                    cm = {"PASS": "#00C853", "FAIL": "#D50000", "OK": "#00C853", "REJECT": "#D50000",
+                          "VALID": "#00C853", "EXPIRED": "#D50000", "EXPIRING_SOON": "#FFD600",
+                          "WARNING": "#FFD600", "ALERT": "#FF6D00"}
+                    fig_b = px.bar(sc, x="Status", y="จำนวน", color="Status",
+                                   color_discrete_map=cm, title=f"สรุปสถานะ — {cfg['name_th']}")
+                    fig_b.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), showlegend=False)
+                    st.plotly_chart(fig_b, use_container_width=True)
+
+            with col_chart2:
+                date_cols = [c for c in df_dept.columns if "date" in c.lower() or "time" in c.lower()]
+                kpi_col = cfg.get("kpi_column")
+                if date_cols and kpi_col and kpi_col in df_dept.columns:
+                    try:
+                        df_t = df_dept.copy()
+                        df_t[date_cols[0]] = pd.to_datetime(df_t[date_cols[0]], errors="coerce")
+                        df_t = df_t.dropna(subset=[date_cols[0], kpi_col])
+                        df_t = df_t.groupby(df_t[date_cols[0]].dt.date)[kpi_col].mean().reset_index()
+                        df_t.columns = ["วันที่", "ค่าเฉลี่ย KPI"]
+                        fig_l = px.line(df_t, x="วันที่", y="ค่าเฉลี่ย KPI",
+                                        title=f"Trend — {cfg['name_th']}", markers=True)
+                        fig_l.add_hline(y=cfg["threshold_green"], line_dash="dot",
+                                        line_color="green", annotation_text="Green")
+                        fig_l.add_hline(y=cfg["threshold_yellow"], line_dash="dot",
+                                        line_color="orange", annotation_text="Yellow")
+                        fig_l.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20))
+                        st.plotly_chart(fig_l, use_container_width=True)
+                    except Exception:
+                        pass
+
+            st.subheader("📋 ตารางข้อมูล")
+            st.dataframe(df_dept, use_container_width=True, height=350)
+            st.download_button(
+                "⬇️ ดาวน์โหลด CSV",
+                df_dept.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+                f"{dept_select}_{pd.Timestamp.now().strftime('%Y%m%d')}.csv", "text/csv")
+        else:
+            st.warning("ไม่มีข้อมูล — กรุณาอัปโหลดไฟล์ HTML ในแท็บ 📤 อัปโหลดข้อมูล")
 
 
 # ════════════════════════════════════════════════════════════
