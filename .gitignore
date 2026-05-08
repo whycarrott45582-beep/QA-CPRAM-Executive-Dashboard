@@ -1,0 +1,12 @@
+# ⚠️ อย่า push ไฟล์เหล่านี้ขึ้น GitHub เด็ดขาด!
+service_account.json
+*.json
+.env
+__pycache__/
+*.pyc
+*.pyo
+local_data/
+qa_cpram.db
+.streamlit/secrets.toml
+venv/
+.venv/
