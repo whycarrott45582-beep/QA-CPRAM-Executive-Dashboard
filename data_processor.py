@@ -291,6 +291,77 @@ def compute_domestic_quality(data: dict) -> dict:
     return {"score": avg, "status": status, "label": label, "issues": issues[:3]}
 
 
+def compute_dept_rsi(dept_key: str, df: pd.DataFrame, period: int = 14) -> dict:
+    cfg = DEPARTMENTS[dept_key]
+    kpi_col = cfg["kpi_column"]
+
+    if df is None or df.empty:
+        return {"rsi": None, "signal": "no_data", "series": pd.DataFrame(), "period": period}
+
+    date_cols = [c for c in df.columns if "date" in c.lower() or "time" in c.lower()]
+    if not date_cols:
+        return {"rsi": None, "signal": "no_data", "series": pd.DataFrame(), "period": period}
+
+    date_col = date_cols[0]
+    df_work = df.copy()
+
+    if kpi_col in df_work.columns:
+        val_col = kpi_col
+    elif "status" in df_work.columns:
+        df_work["_kpi_d"] = df_work["status"].isin(["PASS", "VALID", "OK"]).astype(float) * 100
+        val_col = "_kpi_d"
+    else:
+        return {"rsi": None, "signal": "no_data", "series": pd.DataFrame(), "period": period}
+
+    try:
+        df_work[date_col] = pd.to_datetime(df_work[date_col], errors="coerce")
+        df_work = df_work.dropna(subset=[date_col, val_col])
+        df_daily = df_work.groupby(df_work[date_col].dt.date)[val_col].mean().reset_index()
+        df_daily.columns = ["date", "kpi"]
+        df_daily = df_daily.sort_values("date").reset_index(drop=True)
+
+        n = len(df_daily)
+        if n < 3:
+            return {"rsi": None, "signal": "no_data", "series": df_daily, "period": period}
+
+        actual_period = min(period, n - 1)
+        delta = df_daily["kpi"].diff()
+        gain = delta.clip(lower=0)
+        loss = (-delta).clip(lower=0)
+
+        avg_gain = gain.ewm(alpha=1.0 / actual_period, min_periods=actual_period).mean()
+        avg_loss = loss.ewm(alpha=1.0 / actual_period, min_periods=actual_period).mean()
+
+        rs = avg_gain / avg_loss.replace(0, np.nan)
+        rsi_series = 100 - (100 / (1 + rs))
+        df_daily["rsi"] = rsi_series.values
+
+        valid_rsi = df_daily["rsi"].dropna()
+        current_rsi = float(valid_rsi.iloc[-1]) if not valid_rsi.empty else None
+
+        if current_rsi is None:
+            signal = "no_data"
+        elif current_rsi >= 70:
+            signal = "overbought"
+        elif current_rsi <= 30:
+            signal = "oversold"
+        else:
+            signal = "neutral"
+
+        return {
+            "rsi": round(current_rsi, 1) if current_rsi is not None else None,
+            "signal": signal,
+            "series": df_daily,
+            "period": actual_period,
+        }
+    except Exception:
+        return {"rsi": None, "signal": "no_data", "series": pd.DataFrame(), "period": period}
+
+
+def compute_all_rsi(data: dict, period: int = 14) -> dict:
+    return {dk: compute_dept_rsi(dk, df, period) for dk, df in data.items()}
+
+
 def save_snapshot(data: dict, db_path: Path = None):
     if db_path is None: db_path = DB_PATH
     conn = sqlite3.connect(db_path)

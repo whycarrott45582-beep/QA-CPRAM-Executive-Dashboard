@@ -15,7 +15,8 @@ from config import APP_TITLE, APP_ICON, DEPARTMENTS, GROUPS, TRAFFIC
 from data_processor import (
     compute_factory_kpi, compute_export_readiness,
     compute_domestic_quality, compute_dept_kpi,
-    load_uploaded_file, save_snapshot, load_local_html_raw
+    load_uploaded_file, save_snapshot, load_local_html_raw,
+    compute_dept_rsi, compute_all_rsi,
 )
 from linkage_engine import run_linkage_checks, alerts_to_dataframe
 from gdrive_handler import (
@@ -153,6 +154,7 @@ domestic_kpi = compute_domestic_quality(data)
 alerts       = run_linkage_checks(data)
 alerts_df    = alerts_to_dataframe(alerts)
 dept_kpis    = factory_kpi["dept_kpis"]
+dept_rsi     = compute_all_rsi(data)
 TC = {"green": "#00C853", "yellow": "#FFD600", "red": "#D50000"}
 
 # ── Override KPI ด้วยค่าจริงจาก HTML Dashboard ───────────────
@@ -405,8 +407,9 @@ with tab_exec:
         domestic_kpi = domestic_kpi,
         dept_kpis    = dept_kpis,
         alerts       = alerts,
+        dept_rsi     = dept_rsi,
     )
-    components.html(exec_html, height=920, scrolling=True)
+    components.html(exec_html, height=1150, scrolling=True)
 
 
 # ════════════════════════════════════════════════════════════
@@ -490,6 +493,72 @@ with tab_dept:
                     except Exception:
                         pass
 
+            # ── RSI Section ──────────────────────────────────────
+            st.divider()
+            st.subheader("📈 RSI Momentum Indicator")
+            rsi_data = dept_rsi.get(dept_select, {})
+            rsi_val  = rsi_data.get("rsi")
+            signal   = rsi_data.get("signal", "no_data")
+            rsi_series = rsi_data.get("series", pd.DataFrame())
+
+            SIGNAL_INFO = {
+                "overbought": ("🔴 Overbought", "#D50000", "KPI วิ่งแรงต่อเนื่อง — เฝ้าระวังการกลับตัว"),
+                "oversold":   ("🔵 Oversold",   "#1565c0", "KPI ตกต่ำต่อเนื่อง — ต้องดำเนินการแก้ไข"),
+                "neutral":    ("🟢 Neutral",     "#00C853", "KPI อยู่ในช่วงปกติ สมดุลดี"),
+                "no_data":    ("⬜ ไม่มีข้อมูล","#9e9e9e", "ข้อมูลไม่เพียงพอสำหรับคำนวณ RSI"),
+            }
+            lbl, sig_color, sig_desc = SIGNAL_INFO.get(signal, SIGNAL_INFO["no_data"])
+
+            rsi_c1, rsi_c2 = st.columns([1, 3])
+            with rsi_c1:
+                st.markdown(
+                    f'<div style="background:{sig_color}18;border:2px solid {sig_color};border-radius:12px;'
+                    f'padding:14px;text-align:center;">'
+                    f'<div style="font-size:2rem;font-weight:700;color:{sig_color};">'
+                    f'{f"{rsi_val:.1f}" if rsi_val is not None else "N/A"}</div>'
+                    f'<div style="font-size:0.8rem;color:{sig_color};font-weight:600;">RSI ({rsi_data.get("period",14)}d)</div>'
+                    f'<div style="font-size:1.2rem;margin-top:6px;">{lbl}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+                st.caption(sig_desc)
+
+            with rsi_c2:
+                if not rsi_series.empty and "rsi" in rsi_series.columns and rsi_series["rsi"].notna().any():
+                    fig_rsi = go.Figure()
+                    fig_rsi.add_hrect(y0=70, y1=100, fillcolor="rgba(213,0,0,0.07)",
+                                      line_width=0, annotation_text="Overbought ≥70",
+                                      annotation_position="top left",
+                                      annotation_font_size=10, annotation_font_color="#D50000")
+                    fig_rsi.add_hrect(y0=0, y1=30, fillcolor="rgba(21,101,192,0.07)",
+                                      line_width=0, annotation_text="Oversold ≤30",
+                                      annotation_position="bottom left",
+                                      annotation_font_size=10, annotation_font_color="#1565c0")
+                    fig_rsi.add_hline(y=70, line_dash="dash", line_color="#D50000", line_width=1.2)
+                    fig_rsi.add_hline(y=30, line_dash="dash", line_color="#1565c0", line_width=1.2)
+                    fig_rsi.add_hline(y=50, line_dash="dot",  line_color="#bbb",    line_width=0.8)
+                    fig_rsi.add_trace(go.Scatter(
+                        x=rsi_series["date"].astype(str),
+                        y=rsi_series["rsi"],
+                        mode="lines+markers",
+                        name="RSI",
+                        line=dict(color="#7b1fa2", width=2.5),
+                        marker=dict(size=5, color="#7b1fa2"),
+                    ))
+                    fig_rsi.update_layout(
+                        height=220,
+                        margin=dict(l=20, r=20, t=10, b=20),
+                        yaxis=dict(range=[0, 100], title="RSI", tickvals=[0,30,50,70,100]),
+                        xaxis=dict(title=""),
+                        showlegend=False,
+                        plot_bgcolor="white",
+                        paper_bgcolor="white",
+                    )
+                    st.plotly_chart(fig_rsi, use_container_width=True)
+                else:
+                    st.info("ข้อมูลไม่เพียงพอสำหรับคำนวณ RSI (ต้องการอย่างน้อย 3 วันที่ต่างกัน)")
+
+            st.divider()
             st.subheader("📋 ตารางข้อมูล")
             st.dataframe(df_dept, use_container_width=True, height=350)
             st.download_button(

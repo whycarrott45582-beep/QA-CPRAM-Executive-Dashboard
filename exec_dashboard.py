@@ -261,12 +261,57 @@ new Chart(document.getElementById('deptBar'), {{
 # MAIN BUILD FUNCTION
 # ════════════════════════════════════════════════════════════
 
+def _rsi_panel(dept_rsi: dict) -> str:
+    SIGNAL = {
+        "overbought": ("🔴", "Overbought", R,        "#fde8e8"),
+        "oversold":   ("🔵", "Oversold",   "#1565c0", "#e3f2fd"),
+        "neutral":    ("🟢", "Neutral",    G,         "#d6f2e0"),
+        "no_data":    ("⬜", "N/A",        "#94a3b8", "#f8fafc"),
+    }
+    html = '<div class="section-label">📈 RSI KPI Momentum (14d)</div>'
+    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;">'
+    for dk, dc in DEPARTMENTS.items():
+        rd = dept_rsi.get(dk, {})
+        rsi_val = rd.get("rsi")
+        signal  = rd.get("signal", "no_data")
+        icon, label, color, bg = SIGNAL.get(signal, SIGNAL["no_data"])
+        rsi_display = f"{rsi_val:.0f}" if rsi_val is not None else "N/A"
+        bar_pct = rsi_val if rsi_val is not None else 0
+        overbought_w = max(0, bar_pct - 70) / 30 * 100 if bar_pct >= 70 else 0
+        neutral_w    = (min(bar_pct, 70) - min(bar_pct, 30)) / 40 * 100 if bar_pct > 30 else 0
+        oversold_w   = min(bar_pct, 30) / 30 * 100 if bar_pct < 30 else 0
+        html += f"""
+      <div style="background:{bg};border-radius:6px;padding:5px 8px;display:flex;align-items:center;gap:6px;">
+        <span style="font-size:0.9rem;">{dc['icon']}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:9px;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{dc['name_th'][:12]}</div>
+          <div style="background:#e2e8f0;border-radius:3px;height:5px;margin-top:3px;overflow:hidden;display:flex;">
+            <div style="width:{min(bar_pct,30)/100*100:.0f}%;height:100%;background:#1565c0;"></div>
+            <div style="width:{max(0,min(bar_pct,70)-30)/100*100:.0f}%;height:100%;background:{G};"></div>
+            <div style="width:{max(0,bar_pct-70)/100*100:.0f}%;height:100%;background:{R};"></div>
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-size:11px;font-weight:700;color:{color};">{rsi_display}</div>
+          <div style="font-size:8px;color:{color};">{label}</div>
+        </div>
+      </div>"""
+    html += '</div>'
+    html += f"""<div style="display:flex;gap:12px;margin-top:6px;font-size:9px;color:#64748b;padding-top:4px;border-top:0.5px solid #e2e8f0;">
+      <span>🔵 &lt;30 Oversold (KPI ตกต่ำ)</span>
+      <span>🟢 30–70 Neutral</span>
+      <span>🔴 &gt;70 Overbought (KPI วิ่งแรง)</span>
+    </div>"""
+    return html
+
+
 def build_exec_html(
     factory_kpi:  dict,
     export_kpi:   dict,
     domestic_kpi: dict,
     dept_kpis:    dict,
     alerts:       list,
+    dept_rsi:     dict = None,
 ) -> str:
     """
     สร้าง HTML Executive Dashboard ครบสมบูรณ์
@@ -392,6 +437,10 @@ body{{background:#eef2f7;padding:0;}}
 
     js = _build_js(factory_kpi, export_kpi, domestic_kpi, comp_kpi, dept_kpis)
 
+    rsi_row = ""
+    if dept_rsi:
+        rsi_row = f'<div class="card" style="margin-bottom:12px;">{_rsi_panel(dept_rsi)}</div>'
+
     return f"""<!DOCTYPE html>
 <html lang="th">
 <head><meta charset="UTF-8">{css}</head>
@@ -401,6 +450,7 @@ body{{background:#eef2f7;padding:0;}}
 {kpi_row}
 {charts_row}
 {bottom_row}
+{rsi_row}
 </div>
 {js}
 </body>

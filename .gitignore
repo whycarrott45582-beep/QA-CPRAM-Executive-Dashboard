@@ -10,3 +10,10 @@ qa_cpram.db
 .streamlit/secrets.toml
 venv/
 .venv/
+
+# Windows system folders
+$Recycle.Bin/
+$SysReset/
+CrackAcrobatPro/
+System Volume Information/
+*.lnk
